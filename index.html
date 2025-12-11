@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decision Quest: Hyperdrive</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Poppins:wght@300;400;600&display=swap');
+
+        :root {
+            --bg-color: #050510;
+            --primary: #3b82f6;
+            --accent: #06b6d4;
+            --danger: #ef4444;
+            --success: #10b981;
+            --text: #f8fafc;
+            --floor: #1e293b;
+        }
+
+        body {
+            margin: 0; overflow: hidden; background: var(--bg-color);
+            font-family: 'Poppins', sans-serif; color: var(--text); user-select: none;
+        }
+
+        /* --- LE MONDE (VISUEL 3D) --- */
+        .world-container {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            perspective: 600px; overflow: hidden; z-index: 1;
+            background: radial-gradient(circle at center, #1e293b 0%, #000 100%);
+        }
+        
+        /* SOL GRILLE */
+        .corridor { position: absolute; width: 100%; height: 100%; transform-style: preserve-3d; }
+        .floor {
+            position: absolute; bottom: 0; width: 200%; height: 50%; left: -50%;
+            background: linear-gradient(#000 0%, var(--floor) 100%);
+            transform-origin: bottom; transform: rotateX(60deg) translateY(100px);
+            background-image: 
+                linear-gradient(rgba(59,130,246,0.3) 1px, transparent 1px), 
+                linear-gradient(90deg, rgba(59,130,246,0.3) 1px, transparent 1px);
+            background-size: 50px 50px;
+            opacity: 0.5;
+        }
+        .walking .floor { animation: moveFloor 0.3s linear infinite; }
+        @keyframes moveFloor {
+            from { transform: rotateX(60deg) translateY(100px) translateY(0); }
+            to { transform: rotateX(60deg) translateY(100px) translateY(50px); }
+        }
+
+        /* PARTICULES (ÉTOILES) */
+        .particle {
+            position: absolute; width: 2px; height: 20px; background: rgba(255,255,255,0.5);
+            top: -20px; z-index: 2; display: none;
+        }
+        .walking .particle { display: block; animation: rainDown 0.8s linear infinite; }
+        @keyframes rainDown {
+            0% { transform: translateY(0); opacity: 0; }
+            10% { opacity: 1; }
+            100% { transform: translateY(100vh); opacity: 0; }
+        }
+
+        /* --- PERSONNAGE (FUSÉE) --- */
+        .character-wrapper {
+            position: absolute; bottom: 15%; left: 50%; transform: translateX(-50%);
+            z-index: 5; transition: all 0.3s;
+        }
+        .character-sprite {
+            font-size: 8rem; filter: drop-shadow(0 0 30px rgba(59,130,246,0.6));
+            transition: transform 0.3s; display: inline-block;
+        }
+        /* Mode Marche : Fusée droite + Tremblement + Flamme arrière */
+        .walking .character-sprite {
+            transform: rotate(-45deg) scale(0.9);
+            animation: thrust 0.1s infinite alternate;
+        }
+        .walking .character-wrapper::after {
+            content: ''; position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%);
+            width: 20px; height: 50px; background: orange; border-radius: 50%;
+            filter: blur(10px); animation: flame 0.1s infinite alternate;
+        }
+        @keyframes thrust { from { margin-bottom: 0px; } to { margin-bottom: 5px; } }
+        @keyframes flame { from { height: 40px; opacity: 0.8; } to { height: 60px; opacity: 1; } }
+
+        /* --- HUD --- */
+        .hud-layer {
+            position: absolute; top: 0; left: 0; width: 100%; padding: 20px;
+            display: flex; justify-content: space-between; z-index: 10; pointer-events: none;
+        }
+        .hud-box { background: rgba(15, 23, 42, 0.8); border: 1px solid rgba(255,255,255,0.1); padding: 10px 20px; border-radius: 12px; backdrop-filter: blur(5px); }
+        .rank-badge { font-family: 'Orbitron'; font-weight: bold; color: var(--accent); }
+        .lives { font-size: 1.5rem; margin-right: 15px;}
+        
+        /* COMBO DISPLAY */
+        .combo-box {
+            text-align: right; font-family: 'Orbitron'; font-weight: bold; color: #fbbf24;
+            opacity: 0; transition: opacity 0.3s;
+        }
+        .combo-box.active { opacity: 1; animation: pulseCombo 0.5s infinite; }
+        @keyframes pulseCombo { 0% { transform: scale(1); } 50% { transform: scale(1.1); } 100% { transform: scale(1); } }
+
+        .xp-container { width: 150px; height: 6px; background: #333; border-radius: 4px; margin-top: 5px; overflow: hidden; }
+        .xp-bar { height: 100%; background: var(--primary); width: 0%; transition: width 0.5s; }
+
+        /* --- MODAL --- */
+        .decision-modal {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) scale(0.9);
+            width: 90%; max-width: 500px; background: rgba(30, 41, 59, 0.98); border: 1px solid var(--primary);
+            border-radius: 20px; padding: 25px; box-shadow: 0 0 50px rgba(0,0,0,0.8); z-index: 20;
+            opacity: 0; pointer-events: none; transition: all 0.3s; display: flex; flex-direction: column; gap: 15px;
+        }
+        .decision-modal.active { opacity: 1; transform: translate(-50%, -50%) scale(1); pointer-events: all; }
+
+        .timer-bar { height: 6px; width: 100%; background: linear-gradient(90deg, #10b981, #ef4444); border-radius: 3px; }
+        .card h2 { margin: 0; color: var(--primary); font-family: 'Orbitron'; font-size: 1.2rem; }
+        .card p { color: #ccc; font-size: 1.1rem; line-height: 1.4; }
+        .actions { display: flex; gap: 15px; justify-content: center; margin-top: 10px; }
+        .btn { border: none; padding: 12px 0; width: 120px; border-radius: 50px; font-weight: bold; font-size: 1.1rem; cursor: pointer; font-family: 'Orbitron'; transition: transform 0.1s; }
+        .btn:hover { transform: scale(1.05); }
+        .btn-no { background: var(--danger); color: white; }
+        .btn-yes { background: var(--success); color: white; }
+        .chart-wrapper { height: 250px; display: none; margin-top: 10px; position: relative; }
+        .result-box { text-align: center; display: none; }
+        .next-btn { background: var(--primary); color: white; width: 100%; padding: 15px; border:none; border-radius:10px; font-weight:bold; cursor:pointer; margin-top:10px; font-family: 'Orbitron'; }
+
+        /* --- ÉCRANS --- */
+        .screen-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(5, 5, 16, 0.95);
+            z-index: 50; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center;
+        }
+        .title-main { font-family: 'Orbitron'; font-size: 3rem; color: var(--primary); margin-bottom: 20px; text-shadow: 0 0 20px var(--primary); }
+        .start-btn { padding: 20px 60px; font-size: 1.5rem; background: var(--success); color: white; border: none; border-radius: 50px; cursor: pointer; font-family: 'Orbitron'; animation: pulse 2s infinite; }
+        
+        .skills { position: absolute; bottom: 20px; right: 20px; display: flex; gap: 10px; z-index: 10; pointer-events: all; }
+        .skill-icon { width: 50px; height: 50px; background: #334155; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1.5rem; cursor: not-allowed; opacity: 0.5; border: 2px solid #555; transition: all 0.3s; }
+        .skill-icon.unlocked { opacity: 1; border-color: var(--accent); cursor: pointer; background: rgba(6,182,212,0.2); }
+        .skill-icon.used { filter: grayscale(1); opacity: 0.3; }
+    </style>
+</head>
+<body>
+
+    <div class="screen-overlay" id="start-screen">
+        <div class="title-main">DECISION<br>QUEST</div>
+        <p style="margin-bottom: 40px; color: #aaa; font-size: 1.2rem;">Maîtrisez l'art de l'équilibre TAMP.</p>
+        <button class="start-btn" onclick="startGame()">DÉCOLLER</button>
+    </div>
+
+    <div class="world-container" id="world">
+        <div class="corridor">
+            <div class="floor"></div>
+        </div>
+        <div id="particles-layer"></div>
+        
+        <div class="character-wrapper" id="char-wrap">
+            <div class="character-sprite" id="avatar">🤖</div>
+        </div>
+    </div>
+
+    <div class="hud-layer" id="hud" style="display:none;">
+        <div class="hud-box">
+            <div class="rank-badge" id="rank-display">STAGIAIRE</div>
+            <div class="xp-container"><div class="xp-bar" id="xp-bar"></div></div>
+            <div style="font-size:0.8rem; color:#aaa; margin-top:2px;">Niveau <span id="lvl-num">1</span>/12</div>
+        </div>
+        <div class="hud-box" style="text-align:right;">
+            <div class="lives" id="lives">❤️❤️❤️</div>
+            <div id="combo-display" class="combo-box">COMBO x<span id="combo-count">0</span> 🔥</div>
+        </div>
+    </div>
+
+    <div class="skills" id="skills-ui" style="display:none;">
+        <div class="skill-icon" id="skill-scanner" onclick="useSkill('scanner')" title="SCANNER (Manager)">🔍</div>
+        <div class="skill-icon" id="skill-joker" onclick="useSkill('joker')" title="JOKER (CEO)">🃏</div>
+    </div>
+
+    <div class="decision-modal" id="decision-ui">
+        <div style="width:100%; height:8px; background:#333; border-radius:4px; overflow:hidden;">
+            <div class="timer-bar" id="timer-bar"></div>
+        </div>
+        <div class="card" id="card-content">
+            <h2 id="s-title">...</h2>
+            <p id="s-desc" style="margin-top:10px;">...</p>
+        </div>
+        <div class="chart-wrapper" id="chart-area-wrapper">
+            <canvas id="radarChart"></canvas>
+        </div>
+        <div class="result-box" id="result-ui">
+            <div id="verdict-title" style="font-family:'Orbitron'; font-size:1.5rem; margin-bottom:5px;"></div>
+            <div id="verdict-msg" style="color:#aaa; font-size:0.9rem;"></div>
+            <button class="next-btn" onclick="resumeWalking()">CONTINUER L'AVENTURE</button>
+        </div>
+        <div class="actions" id="btn-group">
+            <button class="btn btn-no" onclick="makeDecision(false)">NON</button>
+            <button class="btn btn-yes" onclick="makeDecision(true)">OUI</button>
+        </div>
+    </div>
+
+    <div class="screen-overlay" id="end-screen" style="display:none;">
+        <div class="title-main" id="end-title">GAME OVER</div>
+        <div style="font-size:5rem; margin-bottom:20px;" id="end-icon">💀</div>
+        <p style="font-size:1.5rem;">Score Final: <span id="end-score">0</span></p>
+        <p id="end-msg" style="color:#aaa; margin-bottom:30px;">...</p>
+        <button class="start-btn" onclick="location.reload()">REJOUER</button>
+    </div>
+
+<script>
+    // --- LES 12 SCÉNARIOS ---
+    const scenarios = [
+        { title: "Dossier #104", desc: "Arnaque aux retraités. Gain énorme, effort nul. Produit légal mais vide.", moral: false, p: 20, t: 100, a: 100 },
+        { title: "Offre Corporative", desc: "Salaire x2, mais 4h de trajet et tâches ennuyeuses.", moral: true, p: 15, t: 10, a: 100 },
+        { title: "Projet Bénévole", desc: "Aider une asso. Zéro argent, prend tes week-ends, mais équipe géniale.", moral: true, p: 95, t: 40, a: 10 },
+        { title: "Client 'VIP'", desc: "Budget élevé, rapide. Mais le client t'insulte jour et nuit.", moral: true, p: 25, t: 80, a: 70 },
+        { title: "Colis Suspect", desc: "Passer un sac à la frontière. Rapide, Lucratif. 'Sans danger'...", moral: false, p: 80, t: 100, a: 100 },
+        { title: "Passion Coûteuse", desc: "Apprendre la sculpture. Très cher, très long, mais c'est ton rêve.", moral: true, p: 100, t: 30, a: 20 },
+        { title: "Soirée Réseau", desc: "Cocktail obligatoire. Gratuit, finit tard, gens ennuyeux.", moral: true, p: 10, t: 10, a: 60 },
+        { title: "Sprint Créatif", desc: "1 mois enfermé pour créer. Pas de revenu, pas de vie, mais plaisir pur.", moral: true, p: 90, t: 25, a: 50 },
+        { title: "Dilemme PDG", desc: "Licencier 5 amis pour sauver la boite. Horrible mais nécessaire.", moral: true, p: 5, t: 50, a: 100 },
+        { title: "Investissement Gris", desc: "Actions polluantes mais rentables. Légal, rapporte gros, rapide.", moral: false, p: 50, t: 100, a: 80 },
+        { title: "Projet 'Juste'", desc: "Budget correct, temps correct, plaisir moyen. Rien d'excitant.", moral: true, p: 55, t: 55, a: 55 },
+        { title: "Fête en Or", desc: "Gala de l'année. Tout le monde t'adore, budget illimité, mais burnout assuré.", moral: true, p: 100, t: 10, a: 100 }
+    ];
+
+    let state = { level: 0, score: 0, lives: 3, rank: "Stagiaire", skills: { scanner: true, joker: true }, timer: null, combo: 0 };
+    let chartInstance = null;
+
+    // --- SETUP VISUEL (Particules) ---
+    function createParticles() {
+        const container = document.getElementById('particles-layer');
+        for(let i=0; i<30; i++) {
+            let p = document.createElement('div');
+            p.className = 'particle';
+            p.style.left = Math.random() * 100 + '%';
+            p.style.animationDuration = (0.5 + Math.random() * 0.5) + 's';
+            p.style.animationDelay = Math.random() + 's';
+            container.appendChild(p);
+        }
+    }
+    createParticles();
+
+    // --- DÉPLACEMENT ---
+    function startGame() {
+        document.getElementById('start-screen').style.display = 'none';
+        document.getElementById('hud').style.display = 'flex';
+        document.getElementById('skills-ui').style.display = 'flex';
+        walkToNext();
+    }
+
+    function walkToNext() {
+        document.getElementById('decision-ui').classList.remove('active');
+        if (state.level >= scenarios.length) { endGame(true); return; }
+
+        document.body.classList.add('walking');
+        document.getElementById('avatar').innerText = "🚀"; 
+        
+        setTimeout(stopWalkingAndEncounter, 1500); // 1.5s de voyage rapide
+    }
+
+    function stopWalkingAndEncounter() {
+        document.body.classList.remove('walking');
+        document.getElementById('avatar').innerText = "🤖"; 
+        loadScenarioUI();
+    }
+
+    function resumeWalking() {
+        state.level++;
+        updateXP();
+        checkRank();
+        walkToNext();
+    }
+
+    // --- MOTEUR DE JEU ---
+    function loadScenarioUI() {
+        const s = scenarios[state.level];
+        document.getElementById('s-title').innerText = s.title;
+        document.getElementById('s-desc').innerText = s.desc;
+        document.getElementById('chart-area-wrapper').style.display = 'none';
+        document.getElementById('result-ui').style.display = 'none';
+        document.getElementById('btn-group').style.display = 'flex';
+        document.getElementById('decision-ui').classList.add('active');
+        startTimer();
+    }
+
+    function makeDecision(choice) {
+        clearInterval(state.timer);
+        const s = scenarios[state.level];
+        let score = ((s.p * 3) + (s.t * 2) + (s.a * 1)) / 6;
+        let valid = true;
+        let reason = "Score : " + Math.round(score);
+
+        if (!s.moral) { valid = false; reason = "ÉTHIQUE NON RESPECTÉE"; }
+        else if (s.p < 30) { valid = false; reason = "PLAISIR INSUFFISANT"; }
+        else if (s.t < 20) { valid = false; reason = "TROP CHRONOPHAGE"; }
+        else if (s.a < 10) { valid = false; reason = "PERTE D'ARGENT"; }
+        else if (score < 50) { valid = false; reason = "SCORE GLOBAL FAIBLE"; }
+
+        const win = (choice === valid);
+        const titleEl = document.getElementById('verdict-title');
+        
+        if (win) {
+            // Système de Combo
+            state.combo++;
+            let bonus = state.combo > 1 ? 50 : 0;
+            state.score += 100 + bonus;
+            
+            titleEl.innerHTML = `SUCCÈS ${bonus>0 ? "<small>+COMBO!</small>" : ""}`;
+            titleEl.style.color = "#10b981";
+            document.getElementById('avatar').innerText = "🤩";
+            updateComboUI();
+        } else {
+            state.lives--;
+            state.combo = 0; // Reset Combo
+            updateLives();
+            updateComboUI();
+            
+            titleEl.innerText = "ÉCHEC";
+            titleEl.style.color = "#ef4444";
+            document.getElementById('avatar').innerText = "😱";
+            document.getElementById('decision-ui').style.animation = "shake 0.4s";
+            setTimeout(() => document.getElementById('decision-ui').style.animation = "", 400);
+        }
+        document.getElementById('verdict-msg').innerText = reason;
+        document.getElementById('btn-group').style.display = 'none';
+        document.getElementById('result-ui').style.display = 'block';
+        document.getElementById('chart-area-wrapper').style.display = 'block';
+        renderChart(s);
+
+        if (state.lives <= 0) setTimeout(() => endGame(false), 1000);
+    }
+
+    // --- UTILS ---
+    function startTimer() {
+        clearInterval(state.timer);
+        const bar = document.getElementById('timer-bar');
+        let width = 100;
+        state.timer = setInterval(() => {
+            width -= 0.5; bar.style.width = width + "%";
+            bar.style.background = width < 30 ? "#ef4444" : "#10b981";
+            if (width <= 0) { clearInterval(state.timer); timeOut(); }
+        }, 50);
+    }
+
+    function timeOut() {
+        state.lives--; state.combo = 0; updateLives(); updateComboUI();
+        document.getElementById('verdict-title').innerText = "TROP LENT";
+        document.getElementById('verdict-title').style.color = "#ef4444";
+        document.getElementById('verdict-msg').innerText = "Temps écoulé.";
+        document.getElementById('btn-group').style.display = 'none';
+        document.getElementById('result-ui').style.display = 'block';
+        if (state.lives <= 0) setTimeout(() => endGame(false), 1000);
+    }
+
+    function updateXP() {
+        document.getElementById('xp-bar').style.width = ((state.level / 12) * 100) + "%";
+        document.getElementById('lvl-num').innerText = state.level + 1;
+    }
+    function updateLives() { document.getElementById('lives').innerText = "❤️".repeat(state.lives); }
+    function updateComboUI() {
+        const el = document.getElementById('combo-display');
+        const count = document.getElementById('combo-count');
+        count.innerText = state.combo;
+        if(state.combo > 1) el.classList.add('active'); else el.classList.remove('active');
+    }
+
+    function checkRank() {
+        if (state.level === 4) { state.rank = "MANAGER"; unlockSkill('scanner'); alertRank(); } 
+        else if (state.level === 8) { state.rank = "CEO"; unlockSkill('joker'); alertRank(); }
+        document.getElementById('rank-display').innerText = state.rank;
+    }
+    function unlockSkill(id) { document.getElementById('skill-' + id).classList.add('unlocked'); }
+    function alertRank() { const av = document.getElementById('avatar'); av.innerText = "🆙"; setTimeout(() => av.innerText = "🤖", 1500); }
+
+    function useSkill(type) {
+        const btn = document.getElementById('skill-' + type);
+        if (!btn.classList.contains('unlocked') || btn.classList.contains('used')) return;
+        if (type === 'scanner') {
+            document.getElementById('chart-area-wrapper').style.display = 'block';
+            renderChart(scenarios[state.level]);
+        }
+        if (type === 'joker') {
+            clearInterval(state.timer); state.score += 50;
+            document.getElementById('verdict-title').innerText = "JOKER UTILISÉ";
+            document.getElementById('verdict-title').style.color = "#06b6d4";
+            document.getElementById('verdict-msg').innerText = "Niveau passé.";
+            document.getElementById('btn-group').style.display = 'none';
+            document.getElementById('result-ui').style.display = 'block';
+        }
+        btn.classList.add('used');
+    }
+
+    function endGame(win) {
+        document.getElementById('end-screen').style.display = 'flex';
+        document.getElementById('hud').style.display = 'none';
+        document.getElementById('decision-ui').style.display = 'none';
+        document.getElementById('end-score').innerText = state.score;
+        document.getElementById('end-title').innerText = win ? "VICTOIRE" : "GAME OVER";
+        document.getElementById('end-title').style.color = win ? "#10b981" : "#ef4444";
+        document.getElementById('end-icon').innerText = win ? "🏆" : "💀";
+        document.getElementById('end-msg').innerText = win ? "Vous dominez le monde de l'entreprise !" : "La pression a été trop forte.";
+    }
+
+    function renderChart(data) {
+        const wrapper = document.getElementById('chart-area-wrapper');
+        wrapper.innerHTML = ""; 
+        const canvas = document.createElement('canvas');
+        wrapper.appendChild(canvas);
+        const ctx = canvas.getContext('2d');
+        const color = data.moral ? 'rgba(6, 182, 212, 0.5)' : 'rgba(80, 80, 80, 0.5)';
+        const border = data.moral ? '#06b6d4' : '#555';
+        new Chart(ctx, {
+            type: 'radar',
+            data: {
+                labels: ['Plaisir (x3)', 'Temps (x2)', 'Argent (x1)'],
+                datasets: [{ label: 'Situation', data: [data.p, data.t, data.a], backgroundColor: color, borderColor: border, borderWidth: 3, pointBackgroundColor: '#fff' },
+                { label: 'Limite', data: [30, 20, 10], borderColor: 'rgba(239, 68, 68, 0.8)', borderDash: [5, 5], borderWidth: 2, pointRadius: 0 }]
+            },
+            options: { maintainAspectRatio: false, scales: { r: { angleLines: { color: '#334155' }, grid: { color: '#334155' }, pointLabels: { color: '#fff', font: {size: 10, family: 'Orbitron'} }, suggestedMin: 0, suggestedMax: 100, ticks: { display: false, backdropColor: 'transparent' } } }, plugins: { legend: { display: false } } }
+        });
+    }
+</script>
+</body>
+</html>
